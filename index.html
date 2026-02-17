@@ -1,0 +1,292 @@
+
+import React, { useEffect, useState } from 'react';
+import ReactDOM from 'react-dom/client';
+import { GoogleGenAI } from "@google/genai";
+
+// --- 1. الإعدادات والبيانات ---
+const MUSIC_ID = "2wZ9OrZyvPo"; 
+const MUSIC_URL_BASE = "https://www.youtube.com/embed/";
+
+const QUIZ_QUESTIONS = [
+  {
+    question: "منو أكثر واحد حلو ومحبوب بهذا الكون؟",
+    options: ["عمار", "بثكوتة", "عمار البثكوتة أكيد", "ماكو غيره"],
+    correctAnswer: 3 
+  },
+  {
+    question: "شسوي اذا اشتاقيت لعمار؟",
+    options: ["أكلمه فوراً", "أسمع أغنية تذكرني بيه", "أشوف صوره", "كل هذني وأكثر"],
+    correctAnswer: 3 
+  },
+  {
+    question: "ليش عمار اسمه \"بثكوتة\"؟",
+    options: ["لأن ملامحه تذوب القلب", "لأن طعمه حلو مثل السكر", "لأن هو القطعة النادرة بحياتي", "كل ماسبق"],
+    correctAnswer: 3 
+  }
+];
+
+// --- 2. الخدمات (الصوت والذكاء الاصطناعي) ---
+class SoundService {
+  private ctx: AudioContext | null = null;
+  init() {
+    if (!this.ctx) this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+  }
+  playTick() {
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(1200, this.ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.03);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.03);
+    } catch (e) {}
+  }
+}
+const sound = new SoundService();
+
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getRomanticMessage = async () => {
+  try {
+    const res = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `اكتب رسالة رومانسية قصيرة جداً ومميزة لعمار (بثكوتة) بمناسبة عيد ميلاده. استخدم اللهجة العامية العراقية الحنينة (كلمات مثل: يقلبي، فدوة، يروحي، بثكوثتي). سطر واحد فقط. مثال: "كل عام وأنت روحي وبثكوثتي، فدوة لقلبك عمار يا أحلى شي صار بدنيتي."`,
+    });
+    return res.text || "كل عام وأنت روحي وبثكوثتي، فدوة لقلبك عمار يا أحلى شي صار بدنيتي.";
+  } catch { return "كل عام وأنت روحي وبثكوثتي، فدوة لقلبك عمار يا أحلى شي صار بدنيتي."; }
+};
+
+// --- 3. المكونات البصرية ---
+const FloatingHearts = () => {
+  const [hearts, setHearts] = useState<{ id: number; left: string; duration: string; size: string }[]>([]);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setHearts(h => [...h.slice(-15), { 
+        id: Date.now(), 
+        left: Math.random() * 100 + '%', 
+        duration: 5 + Math.random() * 5 + 's', 
+        size: 15 + Math.random() * 20 + 'px' 
+      }]);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+  return (
+    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+      {hearts.map(h => (
+        <div key={h.id} className="heart text-blue-400 opacity-40 select-none" 
+             style={{ left: h.left, fontSize: h.size, animationDuration: h.duration }}>
+          💙
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const MusicToggle = ({ isStarted }: { isStarted: boolean }) => {
+  const [muted, setMuted] = useState(false); // الافتراضي غير صامت عند البدء
+  
+  // لا نقوم بتحميل الإطار إلا عندما يبدأ الموقع لضمان عمل التشغيل التلقائي بعد ضغطة الزر
+  if (!isStarted) return null;
+
+  const query = new URLSearchParams({ 
+    autoplay: '1', 
+    mute: muted ? '1' : '0', 
+    loop: '1', 
+    playlist: MUSIC_ID, 
+    playsinline: '1', 
+    controls: '0',
+    enablejsapi: '1'
+  }).toString();
+
+  return (
+    <div className="fixed bottom-6 left-6 z-[100]">
+      <button onClick={() => setMuted(!muted)} 
+              className={`w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all duration-500 ${!muted ? 'bg-blue-600 animate-spin-slow scale-110' : 'bg-zinc-800 scale-90'}`}>
+        <span className="text-2xl">{muted ? '🔇' : '🎵'}</span>
+      </button>
+      {/* استخدمنا opacity-0 بدلاً من hidden لضمان استمرار عمل المتصفح للمشغل */}
+      <div className="opacity-0 pointer-events-none absolute inset-0 -z-50 w-1 h-1">
+        <iframe 
+          src={`${MUSIC_URL_BASE}${MUSIC_ID}?${query}`} 
+          allow="autoplay; encrypted-media"
+          title="BGM"
+        ></iframe>
+      </div>
+    </div>
+  );
+};
+
+// --- 4. التطبيق الرئيسي ---
+const App = () => {
+  const [phase, setPhase] = useState<'timer' | 'celebrate' | 'web'>('timer');
+  const [timeLeft, setTimeLeft] = useState({ h: 11, m: 59, s: 30 });
+  const [aiNote, setAiNote] = useState("اضغط البثكوتة يروحي..");
+  const [loading, setLoading] = useState(false);
+  const [quiz, setQuiz] = useState({ step: 0, score: 0, done: false });
+  const [showToast, setShowToast] = useState(false);
+
+  useEffect(() => {
+    if (phase === 'timer') {
+      const t = setInterval(() => {
+        sound.playTick(); 
+        setTimeLeft(p => {
+          if (p.s < 59) return { ...p, s: p.s + 1 };
+          if (p.m < 59) return { ...p, m: p.m + 1, s: 0 };
+          setPhase('celebrate');
+          return { h: 12, m: 0, s: 0 };
+        });
+      }, 1000);
+      return () => clearInterval(t);
+    }
+  }, [phase]);
+
+  const fetchNote = async () => {
+    setLoading(true);
+    const m = await getRomanticMessage();
+    setAiNote(m);
+    setLoading(false);
+  };
+
+  const copyURL = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  if (phase === 'timer') {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-blue-500 p-6 text-center select-none" onClick={() => sound.init()}>
+        <div className="text-8xl md:text-9xl font-bold tracking-tighter drop-shadow-[0_0_30px_rgba(59,130,246,0.8)] animate-pulse">
+          {String(timeLeft.h).padStart(2, '0')}:{String(timeLeft.m).padStart(2, '0')}:{String(timeLeft.s).padStart(2, '0')}
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'celebrate') {
+    return (
+      <div className="min-h-screen bg-blue-50 flex flex-col items-center justify-center p-8 text-center animate-fade-in relative overflow-hidden">
+        <FloatingHearts />
+        <div className="text-8xl md:text-9xl mb-8 animate-bounce drop-shadow-lg">🎂💙🎁</div>
+        <h2 className="text-4xl md:text-7xl font-bold text-blue-700 mb-6 font-romantic">عيد ميلادك يا أغلى الناس!</h2>
+        <div className="bg-white px-10 py-5 rounded-full shadow-2xl border-4 border-blue-200 mb-12 text-3xl md:text-5xl font-bold text-blue-600 animate-pulse">
+          24/02/2026
+        </div>
+        {/* الضغط هنا هو "إيماءة المستخدم" التي ستسمح بتشغيل الأغنية */}
+        <button onClick={() => { sound.init(); setPhase('web'); }} 
+                className="group relative px-14 py-6 bg-blue-600 text-white rounded-full text-2xl font-bold shadow-[0_15px_50px_rgba(37,99,235,0.4)] hover:scale-110 active:scale-95 transition-all">
+          افتح موقعك 🎁
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f0f7ff] pb-24 relative overflow-x-hidden">
+      <FloatingHearts />
+      <MusicToggle isStarted={phase === 'web'} />
+
+      {showToast && (
+        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[200] bg-blue-600 text-white px-10 py-3 rounded-full shadow-2xl animate-bounce font-bold">
+          تم نسخ الرابط! أرسله لـ عمار 💙
+        </div>
+      )}
+
+      {/* Hero */}
+      <section className="min-h-screen flex flex-col items-center justify-center text-center px-6 animate-fade-in">
+        <div className="text-9xl mb-8 hover:scale-110 transition-transform cursor-pointer select-none">🍪</div>
+        <h1 className="text-5xl md:text-8xl font-extrabold text-blue-700 mb-4 font-romantic drop-shadow-md">
+          عمار البثكوتة
+        </h1>
+        <p className="text-2xl md:text-3xl text-blue-400 font-bold mb-10">كل عام وأنت لقلبي ❤️</p>
+        <div className="mt-4 animate-bounce text-blue-300 text-3xl">⬇️</div>
+      </section>
+
+      {/* Messages */}
+      <section className="max-w-2xl mx-auto px-6 mb-32">
+        <div className="bg-white/90 backdrop-blur-xl p-12 rounded-[3rem] shadow-2xl border border-blue-100 text-center relative">
+          <div className="absolute -top-5 left-1/2 -translate-x-1/2 bg-blue-500 text-white px-6 py-2 rounded-full text-sm font-bold shadow-lg">
+            رساله لبثكوتي
+          </div>
+          <div onClick={!loading ? fetchNote : undefined} 
+               className={`text-8xl mb-8 cursor-pointer transition-all ${loading ? 'animate-ping opacity-50' : 'hover:rotate-12 active:scale-90'}`}>
+            🍪
+          </div>
+          <div className="min-h-[140px] flex items-center justify-center">
+            <p className={`text-2xl md:text-3xl text-gray-800 italic font-romantic leading-relaxed ${loading ? 'opacity-20' : 'opacity-100'}`}>
+              "{aiNote}"
+            </p>
+          </div>
+          <p className="mt-10 text-blue-400 text-xs font-bold uppercase tracking-widest animate-pulse">
+            دوس على البثكوتة لرسالة جديدة
+          </p>
+        </div>
+      </section>
+
+      {/* Quiz */}
+      <section className="max-w-xl mx-auto px-6 mb-32">
+        <div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border-t-8 border-blue-400 text-center">
+          <h3 className="text-3xl font-bold text-blue-700 mb-10 font-romantic">اختبار "حبنا" 🏆</h3>
+          {!quiz.done ? (
+            <div className="animate-fade-in">
+              <p className="text-gray-800 font-bold text-xl mb-10 leading-snug">
+                {QUIZ_QUESTIONS[quiz.step].question}
+              </p>
+              <div className="grid grid-cols-1 gap-4">
+                {QUIZ_QUESTIONS[quiz.step].options.map((opt, i) => (
+                  <button key={i} onClick={() => {
+                    const isOk = i === QUIZ_QUESTIONS[quiz.step].correctAnswer;
+                    if (quiz.step < QUIZ_QUESTIONS.length - 1) {
+                      setQuiz({ ...quiz, step: quiz.step + 1, score: quiz.score + (isOk ? 1 : 0) });
+                    } else {
+                      setQuiz({ ...quiz, done: true, score: quiz.score + (isOk ? 1 : 0) });
+                    }
+                  }} className="py-5 px-6 bg-blue-50 hover:bg-blue-600 hover:text-white rounded-3xl text-blue-800 border border-blue-100 transition-all active:scale-95 font-bold text-lg">
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="animate-fade-in py-8">
+              <div className="text-7xl mb-6">🍪💙🥇</div>
+              <p className="text-4xl font-bold text-blue-600 mb-4">{quiz.score} من 3</p>
+              <p className="text-gray-600 text-xl font-medium mb-10">
+                {quiz.score === 3 ? "والله العظيم تعرف بثكوتتك صح! 💙" : "يحتاج تركز أكثر وية عمار يروحي! 🍪"}
+              </p>
+              <p className="mt-4 text-rose-500 font-bold">كل عام وأنت بوسط قلبي يا عمار 💙</p>
+              <button onClick={() => setQuiz({ step: 0, score: 0, done: false })} 
+                      className="text-blue-400 font-bold text-lg underline underline-offset-8 mt-6">
+                نعيد الاختبار؟
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <footer className="text-center py-24 px-8 border-t border-blue-100 max-w-2xl mx-auto">
+        <p className="text-blue-500 font-bold mb-10 text-2xl">كل عام وأنت بوسط قلبي يا عمار 💙</p>
+        <button onClick={copyURL} 
+                className="flex items-center gap-4 mx-auto px-10 py-4 bg-white text-rose-600 rounded-full text-lg font-bold border-2 border-blue-200 hover:border-blue-400 shadow-xl active:scale-95 transition-all">
+          <span>🔗</span> نسخ رابط الموقع للمشاركة
+        </button>
+        <div className="flex justify-center gap-2 text-2xl">
+          <span>🍪</span>
+          <span>❤️</span>
+          <span>🍪</span>
+        </div>
+        <p className="mt-12 text-gray-400 text-[11px] tracking-[0.3em] font-mono uppercase">Designed with Love form Alaa - 2026</p>
+      </footer>
+    </div>
+  );
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root')!);
+root.render(<App />);
+
